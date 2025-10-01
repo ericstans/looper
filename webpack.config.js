@@ -39,6 +39,13 @@ module.exports = {
         test: /\.css$/i,
         use: ['style-loader', 'css-loader'],
       },
+      {
+        test: /\.(mp3|wav)$/i,
+        type: 'asset/resource',
+        generator: {
+          filename: 'impulses/[name][ext]'
+        }
+      },
     ],
   },
   resolve: {

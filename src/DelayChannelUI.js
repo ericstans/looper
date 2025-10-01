@@ -63,7 +63,7 @@ export function createUI(channel) {
                 </div>
                 <div class="reverb-controls" id="reverb-controls-${channel.channelNumber}">
                     <div class="reverb-knob">
-                        <div class="control-label">Mix</div>
+                        <div class="control-label">Dry/Wet</div>
                         <div class="control-value" id="reverb-mix-value-${channel.channelNumber}">50%</div>
                         <input type="range" min="0" max="100" value="50" 
                                id="reverb-mix-${channel.channelNumber}">
@@ -80,6 +80,16 @@ export function createUI(channel) {
                             ${irOptions}
                         </select>
                     </div>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <div class="control-label">Volume</div>
+                <div class="control-value" id="volume-value-${channel.channelNumber}">100%</div>
+                <div class="slider-container">
+                    <input type="range" min="0" max="100" value="100" 
+                           id="volume-slider-${channel.channelNumber}" 
+                           class="volume-slider">
                 </div>
             </div>
             
@@ -100,6 +110,7 @@ function attachEventListeners(channel) {
     const reverbMixSlider = channel.element.querySelector(`#reverb-mix-${channel.channelNumber}`);
     const reverbDecaySlider = channel.element.querySelector(`#reverb-decay-${channel.channelNumber}`);
     const irSelect = channel.element.querySelector(`#ir-select-${channel.channelNumber}`);
+    const volumeSlider = channel.element.querySelector(`#volume-slider-${channel.channelNumber}`);
     const resetButton = channel.element.querySelector(`#reset-channel-${channel.channelNumber}`);
     const removeButton = channel.element.querySelector(`#remove-channel-${channel.channelNumber}`);
     
@@ -139,7 +150,7 @@ function attachEventListeners(channel) {
     
     reverbMixSlider.addEventListener('input', (e) => {
         const value = e.target.value / 100;
-        channel.reverbGain.gain.value = value;
+        channel.updateReverbMix(value);
         channel.element.querySelector(`#reverb-mix-value-${channel.channelNumber}`).textContent = `${e.target.value}%`;
     });
     
@@ -151,6 +162,12 @@ function attachEventListeners(channel) {
     
     irSelect.addEventListener('change', (e) => {
         channel.loadImpulseResponse(e.target.value);
+    });
+    
+    volumeSlider.addEventListener('input', (e) => {
+        const value = e.target.value / 100;
+        channel.outputGain.gain.value = value;
+        channel.element.querySelector(`#volume-value-${channel.channelNumber}`).textContent = `${e.target.value}%`;
     });
     
     resetButton.addEventListener('click', () => {

@@ -10,9 +10,11 @@ try {
     impulseResponses = context.keys().map(key => {
         const fileName = key.replace('./', '');
         const nameWithoutExt = fileName.replace(/\.(mp3|wav)$/, '');
+        // context(key) now returns the URL path to the asset thanks to asset/resource
+        const assetPath = context(key);
         return {
             name: nameWithoutExt,
-            path: `/impulses/${fileName}`
+            path: assetPath
         };
     });
 } catch (e) {

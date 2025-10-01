@@ -19,7 +19,8 @@ export class DelayChannel {
         
         // Reverb nodes
         this.convolver = null;
-        this.reverbGain = audioContext.createGain();
+        this.reverbWetGain = audioContext.createGain();
+        this.reverbDryGain = audioContext.createGain();
         this.reverbMix = audioContext.createGain();
         this.reverbEnabled = false;
         
@@ -31,8 +32,10 @@ export class DelayChannel {
         this.delayNode.delayTime.value = 0.5;
         this.wetGain.gain.value = 1.0;
         this.dryGain.gain.value = 0.0;
-        this.reverbGain.gain.value = 0.3;
-        this.reverbMix.gain.value = 0.5;
+        this.outputGain.gain.value = 1.0; // 100% volume
+        this.reverbWetGain.gain.value = 0.5; // 50% wet
+        this.reverbDryGain.gain.value = 0.5; // 50% dry
+        this.reverbMix.gain.value = 1.0;
         
         this.currentDelayMs = 500;
         this.currentBpmDivision = '1/4';
@@ -80,10 +83,16 @@ export class DelayChannel {
         if (enabled) {
             this.wetGain.disconnect();
             this.dryGain.disconnect();
+            
+            // Dry path: wetGain -> reverbDryGain -> reverbMix
+            this.wetGain.connect(this.reverbDryGain);
+            this.reverbDryGain.connect(this.reverbMix);
+            
+            // Wet path: wetGain -> convolver -> reverbWetGain -> reverbMix
             this.wetGain.connect(this.convolver);
-            this.wetGain.connect(this.reverbMix);
-            this.convolver.connect(this.reverbGain);
-            this.reverbGain.connect(this.reverbMix);
+            this.convolver.connect(this.reverbWetGain);
+            this.reverbWetGain.connect(this.reverbMix);
+            
             this.reverbMix.connect(this.outputGain);
             this.dryGain.connect(this.outputGain);
         } else {
@@ -91,7 +100,8 @@ export class DelayChannel {
                 this.wetGain.disconnect();
                 this.dryGain.disconnect();
                 this.convolver.disconnect();
-                this.reverbGain.disconnect();
+                this.reverbWetGain.disconnect();
+                this.reverbDryGain.disconnect();
                 this.reverbMix.disconnect();
             } catch (e) {}
             this.wetGain.connect(this.outputGain);
@@ -112,6 +122,12 @@ export class DelayChannel {
         }
         
         this.convolver.buffer = impulse;
+    }
+    
+    updateReverbMix(value) {
+        // Value is 0-1, where 0 is all dry and 1 is all wet
+        this.reverbWetGain.gain.value = value;
+        this.reverbDryGain.gain.value = 1 - value;
     }
     
     setDelayTime(ms) {
@@ -194,10 +210,15 @@ export class DelayChannel {
         
         // Reconnect to output (with or without reverb)
         if (this.reverbEnabled) {
+            // Dry path
+            this.wetGain.connect(this.reverbDryGain);
+            this.reverbDryGain.connect(this.reverbMix);
+            
+            // Wet path
             this.wetGain.connect(this.convolver);
-            this.wetGain.connect(this.reverbMix);
-            this.convolver.connect(this.reverbGain);
-            this.reverbGain.connect(this.reverbMix);
+            this.convolver.connect(this.reverbWetGain);
+            this.reverbWetGain.connect(this.reverbMix);
+            
             this.reverbMix.connect(this.outputGain);
             this.dryGain.connect(this.outputGain);
         } else {

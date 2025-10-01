@@ -429,12 +429,138 @@ body {
     letter-spacing: 2px;
 }
 
+.canvas-wrapper {
+    position: relative;
+    width: 100%;
+    height: 150px;
+}
+
 #waveform-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 150px;
     background: #0a0a0a;
     border-radius: 8px;
     border: 2px solid #333;
     display: block;
+}
+
+#marker-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 150px;
+    display: block;
+    cursor: crosshair;
+    pointer-events: all;
+}
+
+/* Granular Marker UI */
+.granular-markers-container {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+    padding: 15px;
+    background: rgba(42, 42, 42, 0.5);
+    border-radius: 8px;
+    min-height: 50px;
+}
+
+.granular-marker-ui {
+    background: linear-gradient(180deg, #3a3a3a 0%, #2a2a2a 100%);
+    border-radius: 8px;
+    padding: 12px;
+    border: 2px solid #666;
+    width: 250px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.marker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #555;
+}
+
+.marker-header span {
+    font-weight: bold;
+    color: #FF6B6B;
+    font-size: 1em;
+}
+
+.marker-close {
+    background: #f44336;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.marker-close:hover {
+    background: #da190b;
+}
+
+.marker-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.marker-control {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.marker-control label {
+    font-size: 0.85em;
+    color: #ccc;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.marker-control input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: #555;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.marker-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: #FF6B6B;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.marker-control input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: #FF6B6B;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+.marker-control span {
+    font-size: 0.8em;
+    color: #FF6B6B;
+    font-weight: bold;
 }
 

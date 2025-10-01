@@ -1,5 +1,6 @@
 import { DelayChannel } from './DelayChannel.js';
 import { createUI, updateTimeMode } from './DelayChannelUI.js';
+import { GranularMarker } from './GranularMarker.js';
 
 // Extend DelayChannel with UI methods
 DelayChannel.prototype.createUI = function() {
@@ -25,6 +26,13 @@ export class LoopPedal {
         this.isAudioStarted = false;
         this.animationId = null;
         
+        // Granular synthesis
+        this.granularMarkers = [];
+        this.markerCounter = 1;
+        this.recordingBuffer = null;
+        this.bufferRecorder = null;
+        this.recordingDuration = 10; // 10 seconds circular buffer
+        
         this.init();
     }
     
@@ -38,28 +46,125 @@ export class LoopPedal {
         this.channelsContainer = document.getElementById('channels-container');
         this.waveformCanvas = document.getElementById('waveform-canvas');
         this.canvasContext = this.waveformCanvas.getContext('2d');
+        this.markerCanvas = document.getElementById('marker-canvas');
+        this.markerContext = this.markerCanvas.getContext('2d');
+        this.markersContainer = document.getElementById('granular-markers');
         
         this.startButton.addEventListener('click', () => this.toggleAudio());
         this.bpmInput.addEventListener('input', (e) => this.updateBpm(e.target.value));
         this.timeModeSelect.addEventListener('change', (e) => this.updateTimeMode(e.target.value));
         this.inputModeSelect.addEventListener('change', (e) => this.updateInputMode(e.target.value));
         this.dryVolumeSlider.addEventListener('input', (e) => this.updateDryVolume(e.target.value));
+        this.markerCanvas.addEventListener('dblclick', (e) => this.handleCanvasDoubleClick(e));
         
         this.setupCanvas();
         this.createAddChannelButton();
     }
     
     setupCanvas() {
-        // Set canvas resolution to actual CSS size
+        // Set canvas resolution to actual CSS size for both canvases
         const rect = this.waveformCanvas.getBoundingClientRect();
+        
+        // Waveform canvas (background)
         this.waveformCanvas.width = rect.width;
         this.waveformCanvas.height = rect.height;
+        
+        // Marker canvas (overlay)
+        this.markerCanvas.width = rect.width;
+        this.markerCanvas.height = rect.height;
+        
         this.canvasWidth = rect.width;
         this.canvasHeight = rect.height;
         
-        // Initial clear
+        // Initial clear of waveform canvas
         this.canvasContext.fillStyle = '#0a0a0a';
         this.canvasContext.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
+    }
+    
+    setupBufferRecording() {
+        // Create a ScriptProcessorNode to record audio into a circular buffer
+        const bufferSize = 4096;
+        this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 2, 2);
+        
+        // Create circular buffer (10 seconds at sample rate)
+        const bufferLength = this.audioContext.sampleRate * this.recordingDuration;
+        this.recordingBuffer = this.audioContext.createBuffer(2, bufferLength, this.audioContext.sampleRate);
+        this.bufferWritePosition = 0;
+        
+        this.scriptProcessor.onaudioprocess = (e) => {
+            const inputBuffer = e.inputBuffer;
+            const recordBuffer = this.recordingBuffer;
+            
+            for (let channel = 0; channel < Math.min(inputBuffer.numberOfChannels, 2); channel++) {
+                const inputData = inputBuffer.getChannelData(channel);
+                const recordData = recordBuffer.getChannelData(channel);
+                
+                let writePos = this.bufferWritePosition;
+                for (let i = 0; i < inputBuffer.length; i++) {
+                    recordData[writePos] = inputData[i];
+                    writePos++;
+                    
+                    // Wrap around (circular buffer)
+                    if (writePos >= recordBuffer.length) {
+                        writePos = 0;
+                    }
+                }
+            }
+            
+            // Update write position after all channels processed
+            this.bufferWritePosition += inputBuffer.length;
+            if (this.bufferWritePosition >= recordBuffer.length) {
+                this.bufferWritePosition = this.bufferWritePosition % recordBuffer.length;
+            }
+        };
+        
+        // Connect to master output to record (passthrough - doesn't affect audio)
+        this.masterOutput.connect(this.scriptProcessor);
+        // Note: scriptProcessor is only used for recording, not playback
+        // We don't connect it to destination to avoid doubling the audio
+    }
+    
+    handleCanvasDoubleClick(e) {
+        if (!this.isAudioStarted || !this.recordingBuffer) {
+            alert('Please start audio first');
+            return;
+        }
+        
+        const rect = this.markerCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        
+        // Calculate position in buffer (0-1)
+        // Since waveform scrolls, we need to map X position to buffer position
+        // The rightmost edge is the current write position
+        const normalizedX = x / this.canvasWidth;
+        
+        // Create marker at this position
+        this.createGranularMarker(normalizedX);
+    }
+    
+    createGranularMarker(position) {
+        const marker = new GranularMarker(
+            this.audioContext,
+            position,
+            this.recordingBuffer,
+            this.markerCounter++
+        );
+        
+        marker.onDestroy = (m) => {
+            const index = this.granularMarkers.indexOf(m);
+            if (index > -1) {
+                this.granularMarkers.splice(index, 1);
+            }
+        };
+        
+        // Connect marker to master output
+        marker.connectToDestination(this.masterOutput);
+        
+        // Start playing grains
+        marker.start();
+        
+        this.granularMarkers.push(marker);
+        this.markersContainer.appendChild(marker.element);
     }
     
     async toggleAudio() {
@@ -129,6 +234,9 @@ export class LoopPedal {
             this.masterOutput.connect(this.analyser);
             this.masterOutput.connect(this.audioContext.destination);
             
+            // Set up circular buffer recording for granular synthesis
+            this.setupBufferRecording();
+            
             for (let i = 0; i < 4; i++) {
                 this.addChannel();
             }
@@ -154,6 +262,18 @@ export class LoopPedal {
             this.animationId = null;
         }
         
+        // Stop and destroy all granular markers
+        [...this.granularMarkers].forEach(marker => marker.destroy());
+        this.granularMarkers = [];
+        this.markerCounter = 1;
+        
+        // Disconnect script processor
+        if (this.scriptProcessor) {
+            this.scriptProcessor.disconnect();
+            this.scriptProcessor.onaudioprocess = null;
+            this.scriptProcessor = null;
+        }
+        
         if (this.micStream) {
             this.micStream.getTracks().forEach(track => track.stop());
         }
@@ -173,9 +293,10 @@ export class LoopPedal {
         this.channelsContainer.innerHTML = '';
         this.createAddChannelButton();
         
-        // Clear canvas
+        // Clear canvases
         this.canvasContext.fillStyle = '#0a0a0a';
         this.canvasContext.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
+        this.markerContext.clearRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
     
     addChannel() {
@@ -264,7 +385,7 @@ export class LoopPedal {
         // Get waveform data
         this.analyser.getByteTimeDomainData(this.dataArray);
         
-        // Shift the canvas to the left by 1 pixel
+        // Shift the waveform canvas to the left by 1 pixel
         const imageData = this.canvasContext.getImageData(1, 0, this.canvasWidth - 1, this.canvasHeight);
         this.canvasContext.putImageData(imageData, 0, 0);
         
@@ -305,6 +426,55 @@ export class LoopPedal {
         this.canvasContext.moveTo(0, centerY);
         this.canvasContext.lineTo(this.canvasWidth, centerY);
         this.canvasContext.stroke();
+        
+        // Draw markers on the separate overlay canvas
+        this.drawGranularMarkers();
+    }
+    
+    drawGranularMarkers() {
+        // Clear the entire marker canvas each frame
+        this.markerContext.clearRect(0, 0, this.canvasWidth, this.canvasHeight);
+        
+        const centerY = this.canvasHeight / 2;
+        const now = Date.now();
+        
+        this.granularMarkers.forEach(marker => {
+            const markerX = marker.position * this.canvasWidth;
+            
+            // Draw vertical marker line (semi-transparent)
+            this.markerContext.strokeStyle = 'rgba(255, 107, 107, 0.6)';
+            this.markerContext.lineWidth = 2;
+            this.markerContext.setLineDash([5, 5]);
+            this.markerContext.beginPath();
+            this.markerContext.moveTo(markerX, 0);
+            this.markerContext.lineTo(markerX, this.canvasHeight);
+            this.markerContext.stroke();
+            this.markerContext.setLineDash([]);
+            
+            // Draw marker circle at top
+            this.markerContext.fillStyle = '#FF6B6B';
+            this.markerContext.beginPath();
+            this.markerContext.arc(markerX, 10, 6, 0, 2 * Math.PI);
+            this.markerContext.fill();
+            
+            // Draw active grain particles
+            marker.activeGrains.forEach(grain => {
+                const age = now - grain.birthTime;
+                const lifetime = grain.duration;
+                const alpha = 1 - (age / lifetime); // Fade out over lifetime
+                
+                if (alpha > 0) {
+                    const grainX = grain.position * this.canvasWidth;
+                    const grainY = centerY + (Math.random() - 0.5) * 40; // Random Y around center
+                    
+                    // Draw grain particle
+                    this.markerContext.fillStyle = `rgba(255, 107, 107, ${alpha * 0.8})`;
+                    this.markerContext.beginPath();
+                    this.markerContext.arc(grainX, grainY, 3, 0, 2 * Math.PI);
+                    this.markerContext.fill();
+                }
+            });
+        });
     }
 }
 

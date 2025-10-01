@@ -34,7 +34,14 @@
         </div>
         <div class="waveform-container">
             <h3>Output Waveform</h3>
-            <canvas id="waveform-canvas"></canvas>
+            <div class="canvas-wrapper">
+                <canvas id="waveform-canvas"></canvas>
+                <canvas id="marker-canvas"></canvas>
+            </div>
+            <p style="text-align: center; color: #888; font-size: 0.9em; margin-top: 10px;">
+                Double-click to add granular markers
+            </p>
+            <div class="granular-markers-container" id="granular-markers"></div>
         </div>
     </div>
 </body>
