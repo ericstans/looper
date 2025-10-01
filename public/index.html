@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loop Pedal</title>
+    <link rel="icon" href="../public/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div id="app">
+        <div class="header">
+            <h1>Loop Pedal</h1>
+            <button id="start-audio" class="start-button">Start Audio / Enable Microphone</button>
+            <div class="global-controls">
+                <label for="input-mode">Input:</label>
+                <select id="input-mode">
+                    <option value="mono">Mono (Center)</option>
+                    <option value="stereo">Stereo</option>
+                </select>
+                <label for="dry-volume">Dry Volume:</label>
+                <input type="range" id="dry-volume" min="0" max="100" value="0" class="horizontal-slider" />
+                <span id="dry-volume-value">0%</span>
+                <label for="bpm">BPM:</label>
+                <input type="number" id="bpm" value="120" min="40" max="240" />
+                <label for="time-mode">Time Mode:</label>
+                <select id="time-mode">
+                    <option value="raw">Raw Time (ms)</option>
+                    <option value="bpm">BPM Synced</option>
+                </select>
+            </div>
+        </div>
+        <div class="channels-container" id="channels-container">
+            <!-- Channels will be dynamically added here -->
+        </div>
+        <div class="waveform-container">
+            <h3>Output Waveform</h3>
+            <canvas id="waveform-canvas"></canvas>
+        </div>
+    </div>
+</body>
+</html>
