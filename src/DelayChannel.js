@@ -23,7 +23,7 @@ export class DelayChannel {
         this.reverbDryGain = audioContext.createGain();
         this.reverbMix = audioContext.createGain();
         this.reverbEnabled = false;
-        
+         
         this.createImpulseResponse();
         
         // Set initial values
