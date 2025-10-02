@@ -1,15 +1,18 @@
 export class GranularMarker {
-    constructor(audioContext, position, buffer, markerId) {
+    constructor(audioContext, position, buffer, markerId, scheduler) {
         this.audioContext = audioContext;
         this.position = position; // 0-1, position in the buffer
         this.buffer = buffer;
         this.markerId = markerId;
+        this.scheduler = scheduler;
         
         // Granular parameters
         this.volume = 0.5;
+        // Initialize with logarithmic value (37% slider = 10% position randomization)
         this.positionRandomization = 0.1; // ±10% of position
         this.pitchRandomization = 0.1; // ±10% pitch variation
         this.grainLength = 0.05; // 50ms default grain length
+        this.grainRate = 20; // Grains per second (grain density)
         
         // Audio nodes
         this.output = audioContext.createGain();
@@ -17,11 +20,26 @@ export class GranularMarker {
         
         // Grain scheduling
         this.isPlaying = false;
-        this.grainInterval = null;
-        this.grainRate = 20; // Grains per second
         
         // Active grains for visualization
         this.activeGrains = [];
+        
+        // Callback for grain visualization
+        this.onGrainEmitted = (grainData) => {
+            this.activeGrains.push({
+                ...grainData,
+                birthTime: Date.now(), // For visualization timing
+                duration: grainData.duration * 1000 // Convert to ms
+            });
+            
+            // Clean up old grains
+            setTimeout(() => {
+                const index = this.activeGrains.findIndex(g => g === grainData);
+                if (index > -1) {
+                    this.activeGrains.splice(index, 1);
+                }
+            }, grainData.duration * 1000);
+        };
         
         // Create UI
         this.createUI();
@@ -31,98 +49,70 @@ export class GranularMarker {
         if (this.isPlaying) return;
         this.isPlaying = true;
         
-        // Schedule grain emission
-        const scheduleNextGrain = () => {
-            if (!this.isPlaying) return;
-            
-            this.emitGrain();
-            
-            // Schedule next grain with slight randomization
-            const interval = (1000 / this.grainRate) * (0.9 + Math.random() * 0.2);
-            this.grainInterval = setTimeout(scheduleNextGrain, interval);
-        };
-        
-        scheduleNextGrain();
+        // Register with scheduler
+        this.scheduler.addMarker(this.markerId, {
+            buffer: this.buffer,
+            position: this.position,
+            volume: this.volume,
+            positionRandomization: this.positionRandomization,
+            pitchRandomization: this.pitchRandomization,
+            grainLength: this.grainLength,
+            grainRate: this.grainRate,
+            output: this.output,
+            onGrainEmitted: this.onGrainEmitted
+        });
     }
     
     stop() {
         this.isPlaying = false;
-        if (this.grainInterval) {
-            clearTimeout(this.grainInterval);
-            this.grainInterval = null;
-        }
+        this.scheduler.removeMarker(this.markerId);
     }
     
-    emitGrain() {
-        if (!this.buffer) return;
-        
-        // Create a buffer source for this grain
-        const grain = this.audioContext.createBufferSource();
-        grain.buffer = this.buffer;
-        
-        // Apply pitch randomization
-        const pitchVariation = 1 + (Math.random() * 2 - 1) * this.pitchRandomization;
-        grain.playbackRate.value = pitchVariation;
-        
-        // Create envelope for grain (fade in/out to avoid clicks)
-        const envelope = this.audioContext.createGain();
-        envelope.gain.value = 0;
-        
-        grain.connect(envelope);
-        envelope.connect(this.output);
-        
-        // Calculate position with randomization
-        const positionVariation = (Math.random() * 2 - 1) * this.positionRandomization;
-        let playPosition = this.position + positionVariation;
-        playPosition = Math.max(0, Math.min(1, playPosition)); // Clamp 0-1
-        
-        const startTime = playPosition * this.buffer.duration;
-        const currentTime = this.audioContext.currentTime;
-        const grainDuration = this.grainLength;
-        
-        // Envelope: quick fade in, sustain, quick fade out
-        const fadeTime = Math.min(0.005, grainDuration * 0.1);
-        envelope.gain.setValueAtTime(0, currentTime);
-        envelope.gain.linearRampToValueAtTime(1, currentTime + fadeTime);
-        envelope.gain.setValueAtTime(1, currentTime + grainDuration - fadeTime);
-        envelope.gain.linearRampToValueAtTime(0, currentTime + grainDuration);
-        
-        // Play the grain
-        grain.start(currentTime, startTime, grainDuration);
-        grain.stop(currentTime + grainDuration);
-        
-        // Track grain for visualization
-        const grainData = {
-            position: playPosition,
-            birthTime: Date.now(),
-            duration: grainDuration * 1000 // Convert to ms
-        };
-        this.activeGrains.push(grainData);
-        
-        // Clean up old grains
-        setTimeout(() => {
-            const index = this.activeGrains.indexOf(grainData);
-            if (index > -1) {
-                this.activeGrains.splice(index, 1);
-            }
-        }, grainDuration * 1000);
-    }
+    // emitGrain() is now handled by the scheduler
     
     updateVolume(value) {
         this.volume = value;
         this.output.gain.value = value;
+        
+        // Update scheduler with new parameters
+        if (this.isPlaying) {
+            this.scheduler.updateMarker(this.markerId, { volume: value });
+        }
     }
     
     updatePositionRandomization(value) {
         this.positionRandomization = value;
+        
+        if (this.isPlaying) {
+            this.scheduler.updateMarker(this.markerId, { positionRandomization: value });
+        }
     }
     
     updatePitchRandomization(value) {
         this.pitchRandomization = value;
+        
+        if (this.isPlaying) {
+            this.scheduler.updateMarker(this.markerId, { pitchRandomization: value });
+        }
     }
     
     updateGrainLength(value) {
         this.grainLength = value;
+        
+        if (this.isPlaying) {
+            this.scheduler.updateMarker(this.markerId, { grainLength: value });
+        }
+    }
+    
+    updateGrainDensity(value) {
+        // Convert slider value (0-100) to grain rate (1-100 grains per second)
+        // Use logarithmic scaling for better musical control
+        const logValue = Math.pow(10, (value / 100) * 2); // Maps 0-100 to 1-100
+        this.grainRate = Math.max(1, logValue);
+        
+        if (this.isPlaying) {
+            this.scheduler.updateMarker(this.markerId, { grainRate: this.grainRate });
+        }
     }
     
     connectToDestination(destination) {
@@ -148,9 +138,9 @@ export class GranularMarker {
                 </div>
                 <div class="marker-control">
                     <label>Position Random</label>
-                    <input type="range" min="0" max="100" value="10" 
+                    <input type="range" min="0" max="100" value="37" 
                            id="marker-position-${this.markerId}">
-                    <span id="marker-position-value-${this.markerId}">10%</span>
+                    <span id="marker-position-value-${this.markerId}">10.0%</span>
                 </div>
                 <div class="marker-control">
                     <label>Pitch Random</label>
@@ -164,6 +154,12 @@ export class GranularMarker {
                            id="marker-grain-${this.markerId}">
                     <span id="marker-grain-value-${this.markerId}">50ms</span>
                 </div>
+                <div class="marker-control">
+                    <label>Grain Density</label>
+                    <input type="range" min="0" max="100" value="30" 
+                           id="marker-density-${this.markerId}">
+                    <span id="marker-density-value-${this.markerId}">20/s</span>
+                </div>
             </div>
         `;
         
@@ -176,6 +172,7 @@ export class GranularMarker {
         const positionSlider = this.element.querySelector(`#marker-position-${this.markerId}`);
         const pitchSlider = this.element.querySelector(`#marker-pitch-${this.markerId}`);
         const grainSlider = this.element.querySelector(`#marker-grain-${this.markerId}`);
+        const densitySlider = this.element.querySelector(`#marker-density-${this.markerId}`);
         const closeButton = this.element.querySelector(`#close-marker-${this.markerId}`);
         
         volumeSlider.addEventListener('input', (e) => {
@@ -184,8 +181,14 @@ export class GranularMarker {
         });
         
         positionSlider.addEventListener('input', (e) => {
-            this.updatePositionRandomization(e.target.value / 100);
-            this.element.querySelector(`#marker-position-value-${this.markerId}`).textContent = `${e.target.value}%`;
+            // Convert linear slider value (0-100) to logarithmic position randomization (0.001-0.5)
+            const linearValue = e.target.value / 100;
+            const logValue = Math.pow(10, linearValue * 2.7 - 3); // Maps 0-1 to 0.001-0.5
+            this.updatePositionRandomization(logValue);
+            
+            // Display as percentage with more precision for small values
+            const displayValue = logValue < 0.01 ? (logValue * 1000).toFixed(1) + '‰' : (logValue * 100).toFixed(1) + '%';
+            this.element.querySelector(`#marker-position-value-${this.markerId}`).textContent = displayValue;
         });
         
         pitchSlider.addEventListener('input', (e) => {
@@ -196,6 +199,14 @@ export class GranularMarker {
         grainSlider.addEventListener('input', (e) => {
             this.updateGrainLength(e.target.value / 1000);
             this.element.querySelector(`#marker-grain-value-${this.markerId}`).textContent = `${e.target.value}ms`;
+        });
+        
+        densitySlider.addEventListener('input', (e) => {
+            this.updateGrainDensity(e.target.value);
+            const displayValue = this.grainRate < 10 ? 
+                this.grainRate.toFixed(1) + '/s' : 
+                Math.round(this.grainRate) + '/s';
+            this.element.querySelector(`#marker-density-value-${this.markerId}`).textContent = displayValue;
         });
         
         closeButton.addEventListener('click', () => {

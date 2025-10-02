@@ -1,6 +1,7 @@
 import { DelayChannel } from './DelayChannel.js';
 import { createUI, updateTimeMode } from './DelayChannelUI.js';
 import { GranularMarker } from './GranularMarker.js';
+import { GranularScheduler } from './GranularScheduler.js';
 
 // Extend DelayChannel with UI methods
 DelayChannel.prototype.createUI = function() {
@@ -18,6 +19,7 @@ export class LoopPedal {
         this.micSource = null;
         this.dryGain = null;
         this.analyser = null;
+        this.preGranularOutput = null; // Output before granular synthesis
         this.channels = [];
         this.channelCounter = 1;
         this.bpm = 120;
@@ -32,6 +34,7 @@ export class LoopPedal {
         this.recordingBuffer = null;
         this.bufferRecorder = null;
         this.recordingDuration = 10; // 10 seconds circular buffer
+        this.granularScheduler = null;
         
         this.init();
     }
@@ -81,8 +84,49 @@ export class LoopPedal {
         this.canvasContext.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
     
-    setupBufferRecording() {
-        // Create a ScriptProcessorNode to record audio into a circular buffer
+    async setupBufferRecording() {
+        try {
+            // Load the AudioWorklet
+            await this.audioContext.audioWorklet.addModule('./audio-worklets/buffer-recorder.js');
+            
+            // Create AudioWorkletNode for precise buffer recording
+            this.bufferRecorder = new AudioWorkletNode(this.audioContext, 'buffer-recorder');
+            
+            // Handle messages from the worklet
+            this.bufferRecorder.port.onmessage = (event) => {
+                if (event.data.type === 'bufferData') {
+                    // Create a new buffer from the worklet data
+                    const workletBuffer = event.data.buffer;
+                    const writeIndex = event.data.writeIndex;
+                    const sampleRate = event.data.sampleRate;
+                    
+                    // Create a proper AudioBuffer from the worklet data
+                    const bufferLength = workletBuffer.length;
+                    this.recordingBuffer = this.audioContext.createBuffer(2, bufferLength, sampleRate);
+                    
+                    // Copy data from worklet buffer to AudioBuffer
+                    const leftChannel = this.recordingBuffer.getChannelData(0);
+                    const rightChannel = this.recordingBuffer.getChannelData(1);
+                    
+                    for (let i = 0; i < bufferLength; i++) {
+                        leftChannel[i] = workletBuffer[i];
+                        rightChannel[i] = workletBuffer[i]; // Mono for now
+                    }
+                }
+            };
+            
+            // Connect to pre-granular output for recording (no feedback loop)
+            this.preGranularOutput.connect(this.bufferRecorder);
+            
+        } catch (error) {
+            console.error('Failed to setup AudioWorklet:', error);
+            // Fallback to ScriptProcessorNode
+            this.setupScriptProcessorFallback();
+        }
+    }
+    
+    setupScriptProcessorFallback() {
+        // Fallback to ScriptProcessorNode if AudioWorklet fails
         const bufferSize = 4096;
         this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 2, 2);
         
@@ -118,8 +162,8 @@ export class LoopPedal {
             }
         };
         
-        // Connect to master output to record (passthrough - doesn't affect audio)
-        this.masterOutput.connect(this.scriptProcessor);
+        // Connect to pre-granular output to record (passthrough - doesn't affect audio)
+        this.preGranularOutput.connect(this.scriptProcessor);
         // Note: scriptProcessor is only used for recording, not playback
         // We don't connect it to destination to avoid doubling the audio
     }
@@ -147,7 +191,8 @@ export class LoopPedal {
             this.audioContext,
             position,
             this.recordingBuffer,
-            this.markerCounter++
+            this.markerCounter++,
+            this.granularScheduler
         );
         
         marker.onDestroy = (m) => {
@@ -214,7 +259,11 @@ export class LoopPedal {
                 this.micSource = rawMicSource;
             }
             
-            // Create master output node for all audio
+            // Create pre-granular output node (for recording and visualization)
+            this.preGranularOutput = this.audioContext.createGain();
+            this.preGranularOutput.gain.value = 1.0;
+            
+            // Create final master output node (includes granular synthesis)
             this.masterOutput = this.audioContext.createGain();
             this.masterOutput.gain.value = 1.0;
             
@@ -222,7 +271,7 @@ export class LoopPedal {
             this.dryGain = this.audioContext.createGain();
             this.dryGain.gain.value = 0; // Start at 0 (muted)
             this.micSource.connect(this.dryGain);
-            this.dryGain.connect(this.masterOutput);
+            this.dryGain.connect(this.preGranularOutput);
             
             // Create analyser for waveform visualization
             this.analyser = this.audioContext.createAnalyser();
@@ -230,12 +279,20 @@ export class LoopPedal {
             this.analyser.smoothingTimeConstant = 0.3;
             this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
             
-            // Connect master output to analyser and destination
-            this.masterOutput.connect(this.analyser);
+            // Connect pre-granular output to analyser (for waveform visualization)
+            this.preGranularOutput.connect(this.analyser);
+            
+            // Connect pre-granular output to final master output
+            this.preGranularOutput.connect(this.masterOutput);
+            
+            // Connect final master output to destination
             this.masterOutput.connect(this.audioContext.destination);
             
             // Set up circular buffer recording for granular synthesis
-            this.setupBufferRecording();
+            await this.setupBufferRecording();
+            
+            // Create granular scheduler for precise timing
+            this.granularScheduler = new GranularScheduler(this.audioContext, this.masterOutput);
             
             for (let i = 0; i < 4; i++) {
                 this.addChannel();
@@ -262,12 +319,24 @@ export class LoopPedal {
             this.animationId = null;
         }
         
+        // Stop and destroy granular scheduler
+        if (this.granularScheduler) {
+            this.granularScheduler.destroy();
+            this.granularScheduler = null;
+        }
+        
         // Stop and destroy all granular markers
         [...this.granularMarkers].forEach(marker => marker.destroy());
         this.granularMarkers = [];
         this.markerCounter = 1;
         
-        // Disconnect script processor
+        // Disconnect buffer recorder
+        if (this.bufferRecorder) {
+            this.bufferRecorder.disconnect();
+            this.bufferRecorder = null;
+        }
+        
+        // Disconnect script processor (fallback)
         if (this.scriptProcessor) {
             this.scriptProcessor.disconnect();
             this.scriptProcessor.onaudioprocess = null;
@@ -308,9 +377,9 @@ export class LoopPedal {
             this.timeMode
         );
         
-        // Connect channel to master output
-        if (this.masterOutput) {
-            channel.connectToDestination(this.masterOutput);
+        // Connect channel to pre-granular output (for recording and visualization)
+        if (this.preGranularOutput) {
+            channel.connectToDestination(this.preGranularOutput);
         }
         
         channel.onDestroy = (ch) => {
