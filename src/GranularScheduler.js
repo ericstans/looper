@@ -73,13 +73,23 @@ export class GranularScheduler {
         playPosition = Math.max(0, Math.min(1, playPosition));
         
         const startTime = playPosition * marker.buffer.duration;
-        const grainDuration = marker.grainLength;
+        const grainDuration = Math.max(marker.grainLength, 0.02); // Minimum 20ms for proper declicking
         
-        // Envelope: quick fade in, sustain, quick fade out
-        const fadeTime = Math.min(0.005, grainDuration * 0.1);
+        // Envelope: quick fade in, sustain, quick fade out (max 10ms each)
+        const maxFadeTime = 0.01; // 10ms maximum fade time
+        const fadeTime = Math.min(maxFadeTime, grainDuration * 0.1, grainDuration * 0.5);
+        
+        // Ensure fade time doesn't exceed half the grain duration
+        const actualFadeTime = Math.min(fadeTime, grainDuration * 0.5);
+        
         envelope.gain.setValueAtTime(0, scheduleTime);
-        envelope.gain.linearRampToValueAtTime(marker.volume, scheduleTime + fadeTime);
-        envelope.gain.setValueAtTime(marker.volume, scheduleTime + grainDuration - fadeTime);
+        envelope.gain.linearRampToValueAtTime(marker.volume, scheduleTime + actualFadeTime);
+        
+        // Only add sustain if grain is long enough for fade out
+        if (grainDuration > actualFadeTime * 2) {
+            envelope.gain.setValueAtTime(marker.volume, scheduleTime + grainDuration - actualFadeTime);
+        }
+        
         envelope.gain.linearRampToValueAtTime(0, scheduleTime + grainDuration);
         
         // Schedule the grain
