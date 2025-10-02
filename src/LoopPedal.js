@@ -46,6 +46,8 @@ export class LoopPedal {
         this.inputModeSelect = document.getElementById('input-mode');
         this.dryVolumeSlider = document.getElementById('dry-volume');
         this.dryVolumeValue = document.getElementById('dry-volume-value');
+        this.granularDryVolumeSlider = document.getElementById('granular-dry-volume');
+        this.granularDryVolumeValue = document.getElementById('granular-dry-volume-value');
         this.channelsContainer = document.getElementById('channels-container');
         this.waveformCanvas = document.getElementById('waveform-canvas');
         this.canvasContext = this.waveformCanvas.getContext('2d');
@@ -58,6 +60,7 @@ export class LoopPedal {
         this.timeModeSelect.addEventListener('change', (e) => this.updateTimeMode(e.target.value));
         this.inputModeSelect.addEventListener('change', (e) => this.updateInputMode(e.target.value));
         this.dryVolumeSlider.addEventListener('input', (e) => this.updateDryVolume(e.target.value));
+        this.granularDryVolumeSlider.addEventListener('input', (e) => this.updateGranularDryVolume(e.target.value));
         this.markerCanvas.addEventListener('dblclick', (e) => this.handleCanvasDoubleClick(e));
         
         this.setupCanvas();
@@ -263,6 +266,10 @@ export class LoopPedal {
             this.preGranularOutput = this.audioContext.createGain();
             this.preGranularOutput.gain.value = 1.0;
             
+            // Create granular dry volume control (affects what we hear, not what gets recorded)
+            this.granularDryGain = this.audioContext.createGain();
+            this.granularDryGain.gain.value = 1.0; // Start at 100%
+            
             // Create final master output node (includes granular synthesis)
             this.masterOutput = this.audioContext.createGain();
             this.masterOutput.gain.value = 1.0;
@@ -282,8 +289,11 @@ export class LoopPedal {
             // Connect pre-granular output to analyser (for waveform visualization)
             this.preGranularOutput.connect(this.analyser);
             
-            // Connect pre-granular output to final master output
-            this.preGranularOutput.connect(this.masterOutput);
+            // Connect pre-granular output to granular dry gain (for output volume control)
+            this.preGranularOutput.connect(this.granularDryGain);
+            
+            // Connect granular dry gain to final master output
+            this.granularDryGain.connect(this.masterOutput);
             
             // Connect final master output to destination
             this.masterOutput.connect(this.audioContext.destination);
@@ -334,6 +344,12 @@ export class LoopPedal {
         if (this.bufferRecorder) {
             this.bufferRecorder.disconnect();
             this.bufferRecorder = null;
+        }
+        
+        // Disconnect granular dry gain
+        if (this.granularDryGain) {
+            this.granularDryGain.disconnect();
+            this.granularDryGain = null;
         }
         
         // Disconnect script processor (fallback)
@@ -444,6 +460,14 @@ export class LoopPedal {
             this.dryGain.gain.value = volume;
         }
         this.dryVolumeValue.textContent = `${value}%`;
+    }
+    
+    updateGranularDryVolume(value) {
+        const volume = value / 100;
+        if (this.granularDryGain) {
+            this.granularDryGain.gain.value = volume;
+        }
+        this.granularDryVolumeValue.textContent = `${value}%`;
     }
     
     drawWaveform() {

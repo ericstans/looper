@@ -33,7 +33,12 @@
             <!-- Channels will be dynamically added here -->
         </div>
         <div class="waveform-container">
-            <h3>Output Waveform</h3>
+            <h3>Granulizer</h3>
+            <div class="granulizer-controls">
+                <label for="granular-dry-volume">Dry Volume:</label>
+                <input type="range" id="granular-dry-volume" min="0" max="100" value="100" class="horizontal-slider" />
+                <span id="granular-dry-volume-value">100%</span>
+            </div>
             <div class="canvas-wrapper">
                 <canvas id="waveform-canvas"></canvas>
                 <canvas id="marker-canvas"></canvas>
